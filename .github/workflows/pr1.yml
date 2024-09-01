@@ -1,0 +1,46 @@
+name: Commit timestamp
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  commit-timestamp:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo code
+        uses: actions/checkout@v4
+
+      - name: Get commit timestamp
+        id: get-timestamp
+        run: |
+          # For latest commit hash
+          HASH=$(git rev-parse HEAD)
+          # ISO 8601 Format - https://www.git-scm.com/docs/git-log#Documentation/git-log.txt-emciem
+          TIMESTAMP=$(git show -s --format=%ci $HASH)
+          # Format - date time offset
+          DATE=$(echo $TIMESTAMP | cut -d' ' -f1)
+          TIME=$(echo $TIMESTAMP | cut -d' ' -f2)
+          OFFSET=$(echo $TIMESTAMP | cut -d' ' -f3)
+          echo "DATE=$DATE" >> $GITHUB_ENV
+          echo "TIME=$TIME" >> $GITHUB_ENV
+          echo "OFFSET=$OFFSET" >> $GITHUB_ENV
+
+      - name: Post comment on PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { context, github } = require('@actions/github');
+            const { DATE, TIME, OFFSET } = process.env;
+
+            const issue_number = context.issue.number;
+            const comment = `**Commit details:**\n\n- **Date:** ${DATE}\n- **Time:** ${TIME}\n- **Offset:** ${OFFSET}`;
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body: comment,
+            });
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
