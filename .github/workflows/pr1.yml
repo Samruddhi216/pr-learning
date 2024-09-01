@@ -31,13 +31,13 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { context, github } = require('@actions/github');
+            const { github, context } = require('@actions/github');
             const { DATE, TIME, OFFSET } = process.env;
 
             const issue_number = context.issue.number;
             const comment = `**Commit details:**\n\n- **Date:** ${DATE}\n- **Time:** ${TIME}\n- **Offset:** ${OFFSET}`;
 
-            await github.rest.issues.createComment({
+            github.rest.issues.createComment({
               ...context.repo,
               issue_number,
               body: comment,
