@@ -1,8 +1,15 @@
-name: Commit timestamp
+name: Commit Timestamp
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
-    types: [opened, synchronize, reopened]
+    types:
+      - closed
+      - opened
+      - synchronize
+      - reopened
 
 jobs:
   commit-timestamp:
@@ -12,35 +19,65 @@ jobs:
       - name: Check out repo code
         uses: actions/checkout@v4
 
-      - name: Get commit timestamp
-        id: get-timestamp
+      - name: Get timestamps
+        id: get-timestamps
         run: |
           # For latest commit hash
           HASH=$(git rev-parse HEAD)
-          # ISO 8601 Format - https://www.git-scm.com/docs/git-log#Documentation/git-log.txt-emciem
+
+          # ISO 8601 Format
           TIMESTAMP=$(git show -s --format=%ci $HASH)
-          # Format - date time offset
+
+          # Extract date, time, and offset
           DATE=$(echo $TIMESTAMP | cut -d' ' -f1)
           TIME=$(echo $TIMESTAMP | cut -d' ' -f2)
           OFFSET=$(echo $TIMESTAMP | cut -d' ' -f3)
+
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
           echo "DATE=$DATE" >> $GITHUB_ENV
           echo "TIME=$TIME" >> $GITHUB_ENV
           echo "OFFSET=$OFFSET" >> $GITHUB_ENV
 
-      - name: Post comment on PR
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { context, github } = require('@actions/github');
-            const { DATE, TIME, OFFSET } = process.env;
+      - name: Add the comment to PR
+        if: github.event_name == 'pull_request'
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          TIMESTAMP="${{ env.TIMESTAMP }}"
+          COMMENT="**Commit Timestamp**: ${TIMESTAMP}"
 
-            const issue_number = context.issue.number;
-            const comment = `**Commit details:**\n\n- **Date:** ${DATE}\n- **Time:** ${TIME}\n- **Offset:** ${OFFSET}`;
+          gh pr comment $PR_NUMBER --body "$COMMENT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number,
-              body: comment,
-            });
+      - name: Check if PR is merged
+        id: check-merge
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.event.pull_request.merged }}" == "true" ]; then
+            echo "MERGED=true" >> $GITHUB_ENV
+          else
+            echo "MERGED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Set Git committer identity
+        if: env.MERGED == 'true'
+        run: |
+          PR_AUTHOR_NAME="${{ github.event.pull_request.user.login }}"
+          PR_AUTHOR_EMAIL="${PR_AUTHOR_NAME}@github.com"
+
+          git config --local user.email "$PR_AUTHOR_EMAIL"
+          git config --local user.name "$PR_AUTHOR_NAME"
+
+      - name: Modify the commit message if the PR is merged
+        if: env.MERGED == 'true'
+        run: |
+          # get the last commit message
+          LAST_COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+
+          # prepare the new message with timestamp
+          NEW_MESSAGE="[${{ env.TIMESTAMP }}] ${LAST_COMMIT_MESSAGE}"
+
+          # amend the commit message
+          git commit --amend -m "$NEW_MESSAGE"
+          git push --force
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
