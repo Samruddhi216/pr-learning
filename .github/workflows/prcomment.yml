@@ -5,7 +5,11 @@ on:
     branches:
       - main
   pull_request:
-    types: [opened, synchronize, reopened]
+    types:
+      - closed
+      - opened
+      - synchronize
+      - reopened
 
 jobs:
   commit-timestamp:
@@ -15,70 +19,33 @@ jobs:
       - name: Check out repo code
         uses: actions/checkout@v4
 
-      - name: Get commit timestamp
-        id: get_timestamp
+      - name: Get timestamps
         run: |
-          # Get latest commit hash
+          # For latest commit hash
           HASH=$(git rev-parse HEAD)
 
-          # Get commit timestamp in ISO 8601 format
+          # ISO 8601 Format
           TIMESTAMP=$(git show -s --format=%ci $HASH)
 
-          # Parse the timestamp
+          # Extract date, time, and offset
           DATE=$(echo $TIMESTAMP | cut -d' ' -f1)
           TIME=$(echo $TIMESTAMP | cut -d' ' -f2)
           OFFSET=$(echo $TIMESTAMP | cut -d' ' -f3)
 
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
           echo "DATE=$DATE" >> $GITHUB_ENV
           echo "TIME=$TIME" >> $GITHUB_ENV
           echo "OFFSET=$OFFSET" >> $GITHUB_ENV
 
-      - name: Create or update PR comment
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { context, github } = require('@actions/github');
-            const prNumber = context.issue.number;
-            const { DATE, TIME, OFFSET } = process.env;
+      - name: Add the comment to PR using curl
+        if: github.event_name == 'pull_request'
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          TIMESTAMP="${{ env.TIMESTAMP }}"
+          COMMENT="**Commit Timestamp**: ${TIMESTAMP}"
 
-            if (!prNumber) {
-              console.log('Not running in a PR context.');
-              return;
-            }
-
-            const commentBody = `
-            **Commit Timestamp:**
-            - **Date:** ${DATE}
-            - **Time:** ${TIME}
-            - **Offset:** ${OFFSET}
-            `;
-
-            // Check if there are existing comments from this workflow
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber
-            });
-
-            const existingComment = comments.data.find(comment => comment.body.includes('Commit Timestamp:'));
-
-            if (existingComment) {
-              // Update the existing comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body: commentBody
-              });
-            } else {
-              // Create a new comment
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: commentBody
-              });
-            }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
